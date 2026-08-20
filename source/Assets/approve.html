@@ -1,0 +1,478 @@
+<!DOCTYPE html>
+<!--
+  The approval page.
+
+  Everything is inline: no stylesheet, no script, no font, no image from
+  anywhere else. This page runs on a phone on a home network that may have
+  no route to the internet at all, and it is the screen where somebody
+  hands out an API key — neither of those is a good place for a request to
+  a third party.
+
+  Nothing here is authority. The page reads a session, shows what is
+  asking, and calls the authenticated half of the API; the server decides
+  whether the caller may answer, and the key it issues never comes back
+  through this page.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>Pair a device</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f4f5f7;
+    --card: #ffffff;
+    --text: #14161a;
+    --muted: #5b616b;
+    --line: #d9dce1;
+    --accent: #2f6feb;
+    --accent-text: #ffffff;
+    --danger: #b3261e;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14161a;
+      --card: #1d2026;
+      --text: #eceef1;
+      --muted: #a2a8b2;
+      --line: #2f333b;
+      --accent: #5b8dee;
+      --accent-text: #0b0d10;
+      --danger: #f2846b;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 1.5rem 1rem;
+    background: var(--bg);
+    color: var(--text);
+    font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    display: flex;
+    justify-content: center;
+  }
+  main {
+    width: 100%;
+    max-width: 26rem;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 0.75rem;
+    padding: 1.5rem;
+  }
+  h1 { font-size: 1.25rem; margin: 0 0 0.75rem; }
+  p { margin: 0 0 1rem; }
+  .muted { color: var(--muted); font-size: 0.9rem; }
+  dl { margin: 0 0 1.25rem; }
+  dt { color: var(--muted); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.04em; }
+  dd { margin: 0 0 0.75rem; word-break: break-word; }
+  .code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 1.35rem;
+    letter-spacing: 0.12em;
+  }
+  label { display: block; font-size: 0.85rem; color: var(--muted); margin-bottom: 0.25rem; }
+  input {
+    width: 100%;
+    padding: 0.6rem 0.7rem;
+    margin-bottom: 0.9rem;
+    border: 1px solid var(--line);
+    border-radius: 0.5rem;
+    background: var(--bg);
+    color: var(--text);
+    font-size: 1rem;
+  }
+  button {
+    width: 100%;
+    padding: 0.7rem 1rem;
+    margin-bottom: 0.6rem;
+    border: 1px solid var(--line);
+    border-radius: 0.5rem;
+    background: var(--bg);
+    color: var(--text);
+    font-size: 1rem;
+    cursor: pointer;
+  }
+  button.primary { background: var(--accent); color: var(--accent-text); border-color: transparent; }
+  button.link { background: none; border: none; color: var(--muted); text-decoration: underline; }
+  button[disabled] { opacity: 0.55; cursor: default; }
+  .warn { color: var(--danger); }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <section id="view-loading">
+    <h1>Pair a device</h1>
+    <p class="muted">Checking the code…</p>
+  </section>
+
+  <section id="view-enter-code" hidden>
+    <h1>Pair a device</h1>
+    <p class="muted">Type the code shown on the other device.</p>
+    <label for="code-input">Code</label>
+    <input id="code-input" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="XXXX-XXXX">
+    <button class="primary" id="code-continue">Continue</button>
+    <p class="muted warn" id="code-error" hidden></p>
+  </section>
+
+  <section id="view-signin" hidden>
+    <h1>Sign in</h1>
+    <p class="muted" id="signin-reason">Sign in to confirm this device.</p>
+    <form id="signin-form">
+      <label for="signin-user">Username</label>
+      <input id="signin-user" autocomplete="username" autocapitalize="none" spellcheck="false">
+      <label for="signin-pass">Password</label>
+      <input id="signin-pass" type="password" autocomplete="current-password">
+      <button class="primary" type="submit" id="signin-submit">Sign in</button>
+    </form>
+    <p class="muted warn" id="signin-error" hidden></p>
+  </section>
+
+  <section id="view-confirm" hidden>
+    <h1>Sign this device in?</h1>
+    <p class="muted">Check that this is the device in front of you.</p>
+    <dl>
+      <dt>Device</dt><dd id="confirm-name"></dd>
+      <dt id="confirm-type-label" hidden>Kind</dt><dd id="confirm-type" hidden></dd>
+      <dt>Code on its screen</dt><dd class="code" id="confirm-code"></dd>
+      <dt>Asked from</dt><dd id="confirm-from"></dd>
+      <dt id="confirm-agent-label" hidden>Reported as</dt><dd class="muted" id="confirm-agent" hidden></dd>
+      <dt>Expires</dt><dd id="confirm-expires"></dd>
+    </dl>
+    <p class="muted warn" id="confirm-reuse" hidden></p>
+    <p class="muted" id="confirm-as"></p>
+    <button class="primary" id="confirm-approve">Yes, sign it in</button>
+    <button id="confirm-deny">Cancel</button>
+    <button class="link" id="confirm-switch">Use a different account</button>
+    <p class="muted warn" id="confirm-error" hidden></p>
+  </section>
+
+  <section id="view-done" hidden>
+    <h1>Done</h1>
+    <p id="done-message"></p>
+    <p class="muted">You can close this page now.</p>
+    <button class="primary" id="done-close">Close</button>
+  </section>
+
+  <section id="view-message" hidden>
+    <h1 id="message-title"></h1>
+    <p id="message-body"></p>
+    <p class="muted" id="message-note"></p>
+  </section>
+</main>
+<script>
+(function () {
+  'use strict';
+
+  var API = '/api/plugin/Vouch/v1';
+
+  /*
+   * The session key Shoko's own web UI writes on this origin. Read only,
+   * and never written or removed: this page may be open inside the web
+   * UI's own frame, and clearing a session it owns would sign somebody
+   * out of a window they are looking at.
+   */
+  var SESSION_KEY = 'apiSession';
+
+  /*
+   * A token obtained by the form below lives here and nowhere else. The
+   * page is a confirmation someone opened from a QR code, quite possibly
+   * on a borrowed phone; leaving a session behind on that phone is not
+   * part of what they agreed to.
+   */
+  var memoryToken = null;
+  var memoryUser = null;
+
+  var code = null;
+  var pending = null;
+
+  function $(id) { return document.getElementById(id); }
+
+  function show(id) {
+    var views = ['view-loading', 'view-enter-code', 'view-signin', 'view-confirm', 'view-done', 'view-message'];
+    for (var i = 0; i < views.length; i++) $(views[i]).hidden = views[i] !== id;
+  }
+
+  function say(element, text) {
+    element.textContent = text;
+    element.hidden = !text;
+  }
+
+  function message(title, body, note) {
+    $('message-title').textContent = title;
+    $('message-body').textContent = body;
+    $('message-note').textContent = note || '';
+    show('view-message');
+  }
+
+  function storedSession() {
+    try {
+      var raw = localStorage.getItem(SESSION_KEY);
+      if (!raw) return null;
+      var parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed.apikey !== 'string' || !parsed.apikey) return null;
+      return parsed;
+    } catch (error) {
+      return null;
+    }
+  }
+
+  function token() {
+    if (memoryToken) return memoryToken;
+    var session = storedSession();
+    return session ? session.apikey : null;
+  }
+
+  function username() {
+    if (memoryUser) return memoryUser;
+    var session = storedSession();
+    return session && typeof session.username === 'string' ? session.username : '';
+  }
+
+  function call(method, path, body) {
+    var options = { method: method, headers: { 'apikey': token() || '' } };
+    if (body) {
+      options.headers['Content-Type'] = 'application/json';
+      options.body = JSON.stringify(body);
+    }
+    return fetch(path, options).then(function (response) {
+      return response.json().catch(function () { return {}; }).then(function (payload) {
+        return { status: response.status, body: payload };
+      });
+    });
+  }
+
+  function normalize(value) {
+    return (value || '').toUpperCase().replace(/[^A-Z]/g, '');
+  }
+
+  function formatCode(value) {
+    var bare = normalize(value);
+    return bare.length > 4 ? bare.slice(0, 4) + '-' + bare.slice(4) : bare;
+  }
+
+  function whenLocal(value) {
+    try { return new Date(value).toLocaleTimeString(); } catch (error) { return String(value); }
+  }
+
+  // ── The flow ──────────────────────────────────────────────────
+
+  function start() {
+    var params = new URLSearchParams(window.location.search);
+    var fromUrl = params.get('code');
+    if (fromUrl) {
+      code = formatCode(fromUrl);
+      load();
+      return;
+    }
+    show('view-enter-code');
+    $('code-input').focus();
+  }
+
+  function load() {
+    if (!token()) {
+      $('signin-reason').textContent = 'Sign in to confirm this device.';
+      show('view-signin');
+      $('signin-user').focus();
+      return;
+    }
+
+    show('view-loading');
+    call('GET', API + '/Pending/' + encodeURIComponent(code)).then(function (result) {
+      if (result.status === 401) {
+        // The stored session is not being accepted. Offer the form
+        // rather than clearing anything: the session may not be ours.
+        memoryToken = null;
+        $('signin-reason').textContent = 'That session is no longer valid. Sign in to confirm this device.';
+        show('view-signin');
+        return;
+      }
+      if (result.status === 404) {
+        message('No such code', 'Nothing is waiting for this code.', 'Ask the other device for a new one.');
+        return;
+      }
+      if (result.status === 429) {
+        message('Too many attempts', result.body.message || 'Try again later.', '');
+        return;
+      }
+      if (result.status !== 200) {
+        outcome(result.body.status, result.body.message);
+        return;
+      }
+
+      pending = result.body;
+      render();
+    }).catch(function () {
+      message('Cannot reach the server', 'The server did not answer.', 'Check that Shoko is running and try again.');
+    });
+  }
+
+  function render() {
+    $('confirm-name').textContent = pending.deviceName;
+    $('confirm-code').textContent = pending.userCode;
+    $('confirm-from').textContent = pending.requestedFrom;
+    $('confirm-expires').textContent = whenLocal(pending.expiresAt);
+
+    $('confirm-type').textContent = pending.deviceType || '';
+    $('confirm-type').hidden = !pending.deviceType;
+    $('confirm-type-label').hidden = !pending.deviceType;
+
+    $('confirm-agent').textContent = pending.userAgent || '';
+    $('confirm-agent').hidden = !pending.userAgent;
+    $('confirm-agent-label').hidden = !pending.userAgent;
+
+    say($('confirm-reuse'), pending.deviceNameInUse
+      ? 'You already have a key under this device name. Approving gives this device that same key, and revoking it later would sign both out.'
+      : '');
+
+    $('confirm-as').textContent = username()
+      ? 'It will be signed in as ' + username() + '.'
+      : 'It will be signed in as the account you are signed in with.';
+
+    say($('confirm-error'), '');
+    show('view-confirm');
+  }
+
+  function answer(path) {
+    $('confirm-approve').disabled = true;
+    $('confirm-deny').disabled = true;
+    say($('confirm-error'), '');
+
+    call('POST', API + path, { userCode: code }).then(function (result) {
+      if (result.status === 200) {
+        outcome(result.body.status, result.body.message);
+        return;
+      }
+      if (result.status === 401) {
+        memoryToken = null;
+        $('signin-reason').textContent = 'That session is no longer valid. Sign in to confirm this device.';
+        show('view-signin');
+        return;
+      }
+      outcome(result.body.status, result.body.message);
+    }).catch(function () {
+      $('confirm-approve').disabled = false;
+      $('confirm-deny').disabled = false;
+      say($('confirm-error'), 'The server did not answer. Try again.');
+    });
+  }
+
+  /*
+   * The four outcomes, kept apart on purpose. A person who refused needs
+   * to be told the other device is going back to its own sign-in screen;
+   * a person who was too slow needs to be told to ask for a new code.
+   * Collapsing them into one "that did not work" is the failure this
+   * flow is built to avoid.
+   */
+  function outcome(status, text) {
+    if (status === 'approved') {
+      $('done-message').textContent = text || 'That device has been signed in.';
+      show('view-done');
+      return;
+    }
+    if (status === 'denied') {
+      message('Refused', text || 'Nothing was signed in.',
+        'The other device will go back to its own sign-in screen.');
+      return;
+    }
+    if (status === 'expired') {
+      message('Too slow', text || 'This code expired before it was confirmed.',
+        'Ask the other device for a new code.');
+      return;
+    }
+    if (status === 'completed') {
+      message('Already used', text || 'This code has already been used.',
+        'Ask the other device for a new code.');
+      return;
+    }
+    message('No such code', text || 'Nothing is waiting for this code.',
+      'Ask the other device for a new code.');
+  }
+
+  // ── Signing in ────────────────────────────────────────────────
+
+  function signIn(event) {
+    event.preventDefault();
+    var user = $('signin-user').value.trim();
+    var pass = $('signin-pass').value;
+    if (!user) {
+      say($('signin-error'), 'Enter your Shoko username.');
+      return;
+    }
+
+    $('signin-submit').disabled = true;
+    say($('signin-error'), '');
+
+    fetch('/api/auth', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user: user, pass: pass, device: 'Vouch approval page' })
+    }).then(function (response) {
+      $('signin-submit').disabled = false;
+      if (response.status === 401) {
+        say($('signin-error'), 'Incorrect username or password.');
+        return null;
+      }
+      if (!response.ok) {
+        say($('signin-error'), 'Sign-in failed (' + response.status + ').');
+        return null;
+      }
+      return response.json();
+    }).then(function (payload) {
+      if (!payload || typeof payload.apikey !== 'string' || !payload.apikey) return;
+      $('signin-pass').value = '';
+      memoryToken = payload.apikey;
+      memoryUser = user;
+      load();
+    }).catch(function () {
+      $('signin-submit').disabled = false;
+      say($('signin-error'), 'Could not reach the server.');
+    });
+  }
+
+  // ── Wiring ────────────────────────────────────────────────────
+
+  $('code-continue').addEventListener('click', function () {
+    var entered = normalize($('code-input').value);
+    if (entered.length !== 8) {
+      say($('code-error'), 'A code is eight letters.');
+      return;
+    }
+    say($('code-error'), '');
+    code = formatCode(entered);
+    load();
+  });
+
+  $('code-input').addEventListener('keydown', function (event) {
+    if (event.key === 'Enter') $('code-continue').click();
+  });
+
+  $('signin-form').addEventListener('submit', signIn);
+
+  $('confirm-approve').addEventListener('click', function () { answer('/Approve'); });
+  $('confirm-deny').addEventListener('click', function () { answer('/Deny'); });
+
+  $('confirm-switch').addEventListener('click', function () {
+    // Not a refusal: the request stays pending, and whoever signs in next
+    // can answer it.
+    memoryToken = null;
+    memoryUser = null;
+    $('signin-reason').textContent = 'Sign in as the account this device should use.';
+    show('view-signin');
+    $('signin-user').focus();
+  });
+
+  $('done-close').addEventListener('click', function () {
+    // Only works for a window script opened, which a page reached from a
+    // QR code is not. The sentence above the button is the real answer;
+    // this is here because it costs nothing when it does work.
+    window.close();
+  });
+
+  start();
+})();
+</script>
+</body>
+</html>
