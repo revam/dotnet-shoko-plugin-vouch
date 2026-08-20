@@ -324,7 +324,7 @@
     $('confirm-agent-label').hidden = !pending.userAgent;
 
     say($('confirm-reuse'), pending.deviceNameInUse
-      ? 'You already have a key under this device name. Approving gives this device that same key, and revoking it later would sign both out.'
+      ? 'You already have a key under this device name. Approving adds a second one you will not be able to tell apart in your device list.'
       : '');
 
     $('confirm-as').textContent = username()

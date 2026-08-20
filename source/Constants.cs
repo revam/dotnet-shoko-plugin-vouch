@@ -14,6 +14,26 @@ public static class Constants
     public const string PluginName = "Vouch";
 
     /// <summary>
+    /// Stamped into the device name of every key this plugin issues, so a
+    /// vouched key is identifiable wherever device names are listed.
+    ///
+    /// It is load-bearing rather than decorative: <c>Approve</c> refuses a
+    /// caller whose own device name carries it, which is what stops a
+    /// vouched key from minting further vouched keys. Changing the wording
+    /// changes that rule, and would let keys issued under the old wording
+    /// vouch again.
+    /// </summary>
+    public const string VouchedByMarker = " (Vouched by ";
+
+    /// <summary>
+    /// The longest device name a key may carry, marker included.
+    ///
+    /// The requested name is truncated to fit rather than the marker, since
+    /// the marker is a security control and the name is a label.
+    /// </summary>
+    public const int IssuedDeviceNameLimit = 128;
+
+    /// <summary>
     /// Where a second device goes to answer a pairing request.
     ///
     /// It is a path rather than a URL because the host part depends on how

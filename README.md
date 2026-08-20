@@ -150,17 +150,19 @@ All three require a signed-in Shoko session (`apikey` header).
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `GET`  | `Pending/{userCode}` | What is asking. Never returns a key or a device code. |
-| `POST` | `Approve` | Mint a key for the signed-in user and hand it to the requesting device. |
+| `POST` | `Approve` | Mint a key for the signed-in user and hand it to the requesting device. Refused with `403` when the caller's own key was itself vouched. |
 | `POST` | `Deny` | Refuse. |
 
 `Approve` and `Deny` take `{ "userCode": "BCDF-GHJK" }`, and neither response
 ever contains a key.
 
-Note `deviceNameInUse` on the `Pending` response. Shoko hands back the
-*existing* non-expiring key when one is already filed under the same user and
-device name, rather than minting a second — so approving such a request gives
-the new device the key another device is already using, and revoking it later
-would sign out both. Say so on your confirmation screen.
+Note `deviceNameInUse` on the `Pending` response. It no longer means what it
+once did: Shoko hands back an *existing* key only when that key does not
+expire, and every key this plugin issues does, so approving can no longer
+hand two devices the same key. What the flag means now is that this user
+already has a vouched key under this device name, and a second one would be
+indistinguishable from the first in the device list. Worth saying on your
+confirmation screen; no longer a warning about shared credentials.
 
 ### The approval page
 
@@ -220,7 +222,22 @@ header and a `retryAfter` field in the body.
 | Option | Default | Description |
 |--------|---------|-------------|
 | `TrustProxy` | `false` | Read `X-Forwarded-*` when determining the client address and the host in the verification URL. Enable only behind a trusted reverse proxy — otherwise a caller chooses its own address and the host that ends up inside a QR code. |
-| `IssuedKeyLifetimeHours` | `null` | Expire issued keys after this many hours. Null issues a key that does not expire, which is what a television wants; set it where pairing is used for guests or shared screens. |
+| `IssuedKeyLifetimeHours` | `4320` (six months) | How long an issued key lasts, in hours. Minimum 1. There is no never-expires setting: an issued key outliving the session that approved it is the point of the plugin, and a bound is what that costs. Administrators only — Shoko gates its whole configuration API on the `admin` role. |
+
+### A vouched key says so, and cannot vouch
+
+Every issued key carries its approver in its device name — `Living Room TV
+(Vouched by revam)` — so a glance at the device list says which keys came from
+pairing and who approved each one.
+
+That marker is a control, not a label. `Approve` refuses a caller whose own
+device name carries it, so a vouched key cannot mint another. The reason is
+the lifetime: chaining would let a key approaching expiry vouch a fresh one
+with a full term, and repeat, which makes the bound above unenforceable. The
+device pairing is *for* — a shared screen, signed in unattended for months —
+is also the worst candidate for minting credentials.
+
+The marker is never the part that gets truncated when a name is too long.
 
 ## What it does not store
 

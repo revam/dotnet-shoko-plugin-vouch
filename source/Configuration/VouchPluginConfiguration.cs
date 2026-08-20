@@ -1,3 +1,5 @@
+using System.ComponentModel.DataAnnotations;
+
 using Shoko.Abstractions.Config;
 
 namespace Shoko.Plugin.Vouch.Configuration;
@@ -19,18 +21,28 @@ public class VouchPluginConfiguration : IConfiguration
     public bool TrustProxy { get; set; }
 
     /// <summary>
-    /// Gets or sets how many hours an issued key lasts, or <c>null</c> for a
-    /// key that does not expire.
+    /// Gets or sets how many hours an issued key lasts.
     ///
-    /// Null by default because the device being paired is usually a
-    /// television someone wants to stay signed in, and a key that expires is
-    /// a device that stops working on a schedule nobody remembers setting.
-    /// Set it where pairing is used for guests or shared screens: the key is
-    /// then bounded as well as revocable.
+    /// A pairing key outliving the session that approved it is this plugin's
+    /// purpose rather than a flaw in it — the whole point is signing in a
+    /// television from a phone that will not stay signed in itself. What that
+    /// costs is a bound, so the key expires on a schedule instead of never.
+    ///
+    /// The default is six months: long enough that a living-room device is
+    /// not re-paired on any timescale a household notices, short enough that
+    /// a key from a device someone no longer owns does not outlive them.
+    /// The floor is one hour, because a key that expires faster than someone
+    /// can walk to the other screen is a broken pairing, not a strict one.
+    ///
+    /// Only an administrator can change this. Shoko's configuration API is
+    /// gated on the <c>admin</c> role in full, so there is no user-facing
+    /// path to this value and no per-property setting needed to keep it that
+    /// way.
     ///
     /// Independent of how long the pairing <em>request</em> lives, which is
     /// five minutes and not configurable — that one is a security property
     /// rather than a preference.
     /// </summary>
-    public int? IssuedKeyLifetimeHours { get; set; }
+    [Range(1, int.MaxValue)]
+    public int IssuedKeyLifetimeHours { get; set; } = 4320;
 }

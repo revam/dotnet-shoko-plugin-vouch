@@ -255,6 +255,20 @@ public class VouchController(
         if (GetCurrentUser() is not { } user)
             return StatusCode(401, new VouchResponse { Message = "Sign in to answer a pairing request." });
 
+        // A vouched key may not vouch. Checked before the request is claimed,
+        // so a refusal leaves it answerable by someone who may.
+        if (_userService.GetApiTokenFromHttpContext(HttpContext) is { } callerToken &&
+            callerToken.Device.Contains(Constants.VouchedByMarker, StringComparison.Ordinal))
+        {
+            _logger.LogWarning(
+                "Pairing approval refused: {Device} was itself vouched, and a vouched key may not vouch.",
+                callerToken.Device);
+            return StatusCode(403, new VouchResponse
+            {
+                Message = "This device was signed in by pairing, so it cannot sign in another device.",
+            });
+        }
+
         if (!_pairingStore.CanLookup(ips, out var nextAllowedAt))
         {
             _logger.LogWarning("Pairing approval denied due to rate limiting. Client IPs: {IPs}", ips);
@@ -271,12 +285,12 @@ public class VouchController(
 
         var deviceName = ticket.Request.DeviceName;
         var lifetimeHours = _configurationProvider.Load().IssuedKeyLifetimeHours;
+        var issuedDeviceName = StampVouchedBy(deviceName, user.Username);
         ApiToken token;
         try
         {
-            token = lifetimeHours is { } hours and > 0
-                ? await _userService.GenerateApiTokenForUser(user, deviceName, DateTime.Now.AddHours(hours))
-                : await _userService.GenerateApiTokenForUser(user, deviceName);
+            token = await _userService.GenerateApiTokenForUser(
+                user, issuedDeviceName, DateTime.Now.AddHours(lifetimeHours));
         }
         catch (Exception ex)
         {
@@ -346,9 +360,43 @@ public class VouchController(
     private IUser? GetCurrentUser()
         => _userService.GetUserFromHttpContext(HttpContext);
 
+    /// <summary>
+    /// Whether this user already holds a vouched key for a device of this
+    /// name.
+    ///
+    /// It used to look for a non-expiring key of exactly this name, because
+    /// the host hands back an existing non-expiring key when the device name
+    /// matches, and approving would then have shared one key between two
+    /// devices. Issued keys always expire now, and the host only ever reuses
+    /// non-expiring ones, so that can no longer happen and the old check
+    /// could never fire. What is left is worth keeping for a different
+    /// reason: it tells the approver they are about to sign in a second
+    /// device under a name they will not be able to tell apart later.
+    /// </summary>
     private bool HasKeyNamed(IUser user, string deviceName)
         => _userService.GetApiTokensForUser(user)
-            .Any(token => token.ExpiresAt is null && token.Device.Trim().Equals(deviceName, StringComparison.OrdinalIgnoreCase));
+            .Any(token => token.Device.Trim().StartsWith(
+                deviceName + Constants.VouchedByMarker, StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>
+    /// Compose the device name an issued key carries.
+    ///
+    /// The marker is never what gets truncated. It is what
+    /// <see cref="Approve"/> reads back to refuse a vouched caller, so a name
+    /// long enough to push it off the end would be a name that silently wins
+    /// the right to vouch.
+    /// </summary>
+    internal static string StampVouchedBy(string deviceName, string username)
+    {
+        var overhead = Constants.VouchedByMarker.Length + 1;
+        var forName = Math.Min(deviceName.Length, Constants.IssuedDeviceNameLimit - overhead);
+        var forUser = Math.Max(0, Constants.IssuedDeviceNameLimit - overhead - forName);
+        return string.Concat(
+            deviceName.AsSpan(0, Math.Max(0, forName)),
+            Constants.VouchedByMarker,
+            username.AsSpan(0, Math.Min(username.Length, forUser)),
+            ")");
+    }
 
     private static string ToWireStatus(PairingStatus status)
         => status.ToString().ToLowerInvariant();
