@@ -221,7 +221,7 @@ header and a `retryAfter` field in the body.
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `TrustProxy` | `false` | Read `X-Forwarded-*` when determining the client address and the host in the verification URL. Enable only behind a trusted reverse proxy — otherwise a caller chooses its own address and the host that ends up inside a QR code. |
+| `TrustProxy` | `false` | Read `X-Forwarded-*` when determining the client address and the host in the verification URL. Enable only behind a trusted reverse proxy — otherwise a caller chooses its own address and the host that ends up inside a QR code. Only the rightmost `X-Forwarded-For` entry is believed, and only if it parses as an address, so a caller cannot vary the chain to escape rate limiting. |
 | `IssuedKeyLifetimeHours` | `4320` (six months) | How long an issued key lasts, in hours. Minimum 1. There is no never-expires setting: an issued key outliving the session that approved it is the point of the plugin, and a bound is what that costs. Administrators only — Shoko gates its whole configuration API on the `admin` role. |
 
 ### A vouched key says so, and cannot vouch

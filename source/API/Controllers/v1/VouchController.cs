@@ -1,6 +1,7 @@
 using System;
 using System.Diagnostics.CodeAnalysis;
 using System.Linq;
+using System.Net;
 using System.Reflection;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authorization;
@@ -436,9 +437,19 @@ public class VouchController(
     /// The address to show the approver, and the key to rate-limit by.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// The same rule as <c>Forgotten</c> uses: the direct connection is
     /// always what is counted, and a forwarded chain is only believed when
     /// the server has been told it sits behind a proxy.
+    /// </para>
+    /// <para>
+    /// Only the <em>rightmost</em> entry of <c>X-Forwarded-For</c> is taken,
+    /// and only if it parses as an address. Proxies append, so that entry is
+    /// the one our own proxy wrote and everything left of it is whatever the
+    /// caller chose to send. Trusting the whole chain let a caller vary the
+    /// prefix to mint a fresh rate-limit bucket per request, and grew the
+    /// limiter's dictionaries on strings it had written itself.
+    /// </para>
     /// </remarks>
     private bool TryGetClientIps([NotNullWhen(true)] out string? ips)
     {
@@ -449,11 +460,35 @@ public class VouchController(
             return false;
         }
 
-        var forwardedFor = _configurationProvider.Load().TrustProxy
-            ? Request.Headers["X-Forwarded-For"].FirstOrDefault()
-            : null;
-        ips = string.IsNullOrEmpty(forwardedFor) ? remoteIp : $"{forwardedFor} | direct: {remoteIp}";
+        ips = remoteIp;
+        if (!_configurationProvider.Load().TrustProxy)
+            return true;
+
+        // LastOrDefault, then the last entry within it: the header may arrive
+        // as several header lines as well as one comma-separated list.
+        if (RightmostForwardedAddress(Request.Headers["X-Forwarded-For"].LastOrDefault()) is { } client)
+            ips = $"{client} | direct: {remoteIp}";
         return true;
+    }
+
+    /// <summary>
+    /// The address our own proxy reported, or <c>null</c> when the header
+    /// carries nothing we are willing to believe.
+    /// </summary>
+    /// <remarks>
+    /// Rightmost wins because proxies append: that entry is the one written
+    /// by the hop closest to us, and everything left of it was supplied by
+    /// the caller. Anything that does not parse as an address is discarded
+    /// rather than used, which is what keeps a caller-chosen string out of a
+    /// rate-limit key.
+    /// </remarks>
+    internal static string? RightmostForwardedAddress(string? headerValue)
+    {
+        if (string.IsNullOrEmpty(headerValue))
+            return null;
+
+        var rightmost = headerValue.AsSpan()[(headerValue.LastIndexOf(',') + 1)..].Trim();
+        return IPAddress.TryParse(rightmost, out var client) ? client.ToString() : null;
     }
 
     /// <summary>
