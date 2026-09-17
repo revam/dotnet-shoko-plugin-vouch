@@ -80,7 +80,10 @@ device is told `denied` rather than being left to time out.
 ### GUI (Recommended)
 
 1. Open the Shoko Web UI and navigate to **Settings → Plugins → Repositories**.
-2. Add the manifest URL for this repository.
+2. Add the manifest URL:
+   ```
+   https://raw.githubusercontent.com/revam/dotnet-shoko-plugin-vouch/metadata/manifest.json
+   ```
 3. Go to **Settings → Plugins → Browse** and find **Vouch**.
 4. Click **Install** on the desired version.
 5. Restart Shoko.
