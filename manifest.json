@@ -1,0 +1,14 @@
+{
+  "id": "d88779b6-3551-4b07-a05e-595b6e167b13",
+  "name": "Vouch",
+  "overview": "Sign in a second device by showing it a code. A device that is awkward to type on displays a short code; a phone that is already signed in confirms it, and the first device receives its own API key.",
+  "authors": "revam",
+  "repository_url": "https://github.com/revam/dotnet-shoko-plugin-vouch",
+  "tags": [
+    "pairing",
+    "device-sign-in",
+    "authentication",
+    "api"
+  ],
+  "releases": []
+}
