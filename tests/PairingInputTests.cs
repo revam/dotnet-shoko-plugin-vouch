@@ -115,33 +115,4 @@ public class PairingInputTests
 
         Assert.True(store.CanCreate("10.0.0.5", out _));
     }
-
-    [Fact]
-    public void Guessing_at_codes_runs_out_of_attempts()
-    {
-        var clock = NewClock();
-        using var store = NewStore(clock);
-
-        for (var i = 0; i < 10; i++)
-        {
-            Assert.True(store.CanLookup("10.0.0.9", out _));
-            Assert.Equal(PairingStatus.Unknown, store.Lookup("BCDF-GHJK", "10.0.0.9", out _));
-        }
-
-        Assert.False(store.CanLookup("10.0.0.9", out var nextAllowedAt));
-        Assert.NotNull(nextAllowedAt);
-    }
-
-    [Fact]
-    public void Finding_a_real_code_does_not_count_against_the_guess_limit()
-    {
-        var clock = NewClock();
-        using var store = NewStore(clock);
-        var pairing = store.Create("TV", null, null, "10.0.0.5");
-
-        for (var i = 0; i < 20; i++)
-            store.Lookup(pairing.UserCode, "10.0.0.9", out _);
-
-        Assert.True(store.CanLookup("10.0.0.9", out _));
-    }
 }

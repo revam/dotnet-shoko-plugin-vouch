@@ -19,8 +19,6 @@ public class PairingStateMachineTests
 {
     private const string DeviceIp = "10.0.0.5";
 
-    private const string ApproverIp = "10.0.0.9";
-
     private static PairingStore NewStore(TestTimeProvider clock, List<string>? revoked = null)
         => new(NullLogger<PairingStore>.Instance, key =>
         {
@@ -89,7 +87,7 @@ public class PairingStateMachineTests
         using var store = NewStore(clock);
         var pairing = Request(store);
 
-        Assert.Equal(PairingStatus.Pending, store.BeginApproval(pairing.UserCode, ApproverIp, out var ticket));
+        Assert.Equal(PairingStatus.Pending, store.BeginApproval(pairing.UserCode, out var ticket));
         store.CompleteApproval(ticket!, "key-1", "alice", null);
 
         var result = store.Poll(pairing.DeviceCode);
@@ -106,7 +104,7 @@ public class PairingStateMachineTests
         var clock = NewClock();
         using var store = NewStore(clock);
         var pairing = Request(store);
-        store.BeginApproval(pairing.UserCode, ApproverIp, out var ticket);
+        store.BeginApproval(pairing.UserCode, out var ticket);
         store.CompleteApproval(ticket!, "key-1", "alice", null);
 
         var first = store.Poll(pairing.DeviceCode);
@@ -125,8 +123,8 @@ public class PairingStateMachineTests
         using var store = NewStore(clock);
         var pairing = Request(store);
 
-        var first = store.BeginApproval(pairing.UserCode, ApproverIp, out var firstTicket);
-        var second = store.BeginApproval(pairing.UserCode, ApproverIp, out var secondTicket);
+        var first = store.BeginApproval(pairing.UserCode, out var firstTicket);
+        var second = store.BeginApproval(pairing.UserCode, out var secondTicket);
 
         Assert.Equal(PairingStatus.Pending, first);
         Assert.NotNull(firstTicket);
@@ -142,12 +140,12 @@ public class PairingStateMachineTests
         var clock = NewClock();
         using var store = NewStore(clock);
         var pairing = Request(store);
-        store.BeginApproval(pairing.UserCode, ApproverIp, out var ticket);
+        store.BeginApproval(pairing.UserCode, out var ticket);
 
         store.AbandonApproval(ticket!);
 
         Assert.Equal(PairingStatus.Pending, store.Poll(pairing.DeviceCode).Status);
-        Assert.Equal(PairingStatus.Pending, store.BeginApproval(pairing.UserCode, ApproverIp, out var again));
+        Assert.Equal(PairingStatus.Pending, store.BeginApproval(pairing.UserCode, out var again));
         Assert.NotNull(again);
     }
 
@@ -160,7 +158,7 @@ public class PairingStateMachineTests
 
         // One second before the request would have expired.
         clock.Advance(PairingStore.RequestLifetime - TimeSpan.FromSeconds(1));
-        store.BeginApproval(pairing.UserCode, ApproverIp, out var ticket);
+        store.BeginApproval(pairing.UserCode, out var ticket);
         store.CompleteApproval(ticket!, "key-1", "alice", null);
 
         // Past the original deadline, inside the collection window.
@@ -183,7 +181,7 @@ public class PairingStateMachineTests
         using var store = NewStore(clock);
         var pairing = Request(store);
 
-        Assert.Equal(PairingStatus.Denied, store.Deny(pairing.UserCode, ApproverIp, "alice"));
+        Assert.Equal(PairingStatus.Denied, store.Deny(pairing.UserCode, "alice"));
 
         var result = store.Poll(pairing.DeviceCode);
 
@@ -197,7 +195,7 @@ public class PairingStateMachineTests
         var clock = NewClock();
         using var store = NewStore(clock);
         var pairing = Request(store);
-        store.Deny(pairing.UserCode, ApproverIp, "alice");
+        store.Deny(pairing.UserCode, "alice");
 
         clock.Advance(PairingStore.RequestLifetime + TimeSpan.FromMinutes(1));
 
@@ -212,9 +210,9 @@ public class PairingStateMachineTests
         var clock = NewClock();
         using var store = NewStore(clock);
         var pairing = Request(store);
-        store.Deny(pairing.UserCode, ApproverIp, "alice");
+        store.Deny(pairing.UserCode, "alice");
 
-        var status = store.BeginApproval(pairing.UserCode, ApproverIp, out var ticket);
+        var status = store.BeginApproval(pairing.UserCode, out var ticket);
 
         Assert.Equal(PairingStatus.Denied, status);
         Assert.Null(ticket);
@@ -227,8 +225,8 @@ public class PairingStateMachineTests
         using var store = NewStore(clock);
         var pairing = Request(store);
 
-        Assert.Equal(PairingStatus.Denied, store.Deny(pairing.UserCode, ApproverIp, "alice"));
-        Assert.Equal(PairingStatus.Denied, store.Deny(pairing.UserCode, ApproverIp, "bob"));
+        Assert.Equal(PairingStatus.Denied, store.Deny(pairing.UserCode, "alice"));
+        Assert.Equal(PairingStatus.Denied, store.Deny(pairing.UserCode, "bob"));
     }
 
     [Fact]
@@ -237,10 +235,10 @@ public class PairingStateMachineTests
         var clock = NewClock();
         using var store = NewStore(clock);
         var pairing = Request(store);
-        store.BeginApproval(pairing.UserCode, ApproverIp, out var ticket);
+        store.BeginApproval(pairing.UserCode, out var ticket);
         store.CompleteApproval(ticket!, "key-1", "alice", null);
 
-        Assert.Equal(PairingStatus.Approved, store.Deny(pairing.UserCode, ApproverIp, "bob"));
+        Assert.Equal(PairingStatus.Approved, store.Deny(pairing.UserCode, "bob"));
         Assert.Equal("key-1", store.Poll(pairing.DeviceCode).ApiKey);
     }
 
@@ -269,9 +267,9 @@ public class PairingStateMachineTests
 
         clock.Advance(PairingStore.RequestLifetime);
 
-        Assert.Equal(PairingStatus.Expired, store.BeginApproval(pairing.UserCode, ApproverIp, out var ticket));
+        Assert.Equal(PairingStatus.Expired, store.BeginApproval(pairing.UserCode, out var ticket));
         Assert.Null(ticket);
-        Assert.Equal(PairingStatus.Expired, store.Deny(pairing.UserCode, ApproverIp, "alice"));
+        Assert.Equal(PairingStatus.Expired, store.Deny(pairing.UserCode, "alice"));
     }
 
     [Fact]
@@ -283,7 +281,7 @@ public class PairingStateMachineTests
 
         clock.Advance(PairingStore.RequestLifetime);
 
-        Assert.Equal(PairingStatus.Expired, store.Lookup(pairing.UserCode, ApproverIp, out var request));
+        Assert.Equal(PairingStatus.Expired, store.Lookup(pairing.UserCode, out var request));
         Assert.Null(request);
     }
 
@@ -294,7 +292,7 @@ public class PairingStateMachineTests
         var revoked = new List<string>();
         using var store = NewStore(clock, revoked);
         var pairing = Request(store);
-        store.BeginApproval(pairing.UserCode, ApproverIp, out var ticket);
+        store.BeginApproval(pairing.UserCode, out var ticket);
         store.CompleteApproval(ticket!, "key-1", "alice", null);
 
         clock.Advance(PairingStore.CollectionWindow + TimeSpan.FromSeconds(1));
@@ -317,7 +315,7 @@ public class PairingStateMachineTests
         var revoked = new List<string>();
         using var store = NewStore(clock, revoked);
         var pairing = Request(store);
-        store.BeginApproval(pairing.UserCode, ApproverIp, out var ticket);
+        store.BeginApproval(pairing.UserCode, out var ticket);
         store.CompleteApproval(ticket!, "key-1", "alice", null);
 
         clock.Advance(PairingStore.CollectionWindow + TimeSpan.FromSeconds(1));
@@ -335,7 +333,7 @@ public class PairingStateMachineTests
         var revoked = new List<string>();
         using var store = NewStore(clock, revoked);
         var pairing = Request(store);
-        store.BeginApproval(pairing.UserCode, ApproverIp, out var ticket);
+        store.BeginApproval(pairing.UserCode, out var ticket);
         store.CompleteApproval(ticket!, "key-1", "alice", null);
         store.Poll(pairing.DeviceCode);
 
@@ -356,7 +354,7 @@ public class PairingStateMachineTests
         using var store = NewStore(clock);
 
         Assert.Equal(PairingStatus.Unknown, store.Poll(new string('a', 64)).Status);
-        Assert.Equal(PairingStatus.Unknown, store.Lookup("BCDF-GHJK", ApproverIp, out _));
+        Assert.Equal(PairingStatus.Unknown, store.Lookup("BCDF-GHJK", out _));
     }
 
     [Fact]
@@ -440,7 +438,7 @@ public class PairingStateMachineTests
         var pairing = Request(store);
 
         store.Poll(pairing.DeviceCode);
-        store.Deny(pairing.UserCode, ApproverIp, "alice");
+        store.Deny(pairing.UserCode, "alice");
 
         // Same instant as the last poll, so the slow-down rule would fire
         // if it applied. Withholding a refusal for eagerness would turn it
@@ -458,7 +456,7 @@ public class PairingStateMachineTests
         using var store = NewStore(clock);
         var pairing = Request(store);
         store.Poll(pairing.DeviceCode);
-        store.BeginApproval(pairing.UserCode, ApproverIp, out var ticket);
+        store.BeginApproval(pairing.UserCode, out var ticket);
         store.CompleteApproval(ticket!, "key-1", "alice", null);
 
         var result = store.Poll(pairing.DeviceCode);
@@ -479,7 +477,7 @@ public class PairingStateMachineTests
         using var store = NewStore(clock);
         var pairing = store.Create("Kitchen Tablet", "Tablet", "Tablet/2.0", DeviceIp);
 
-        Assert.Equal(PairingStatus.Pending, store.Lookup(pairing.UserCode, ApproverIp, out var request));
+        Assert.Equal(PairingStatus.Pending, store.Lookup(pairing.UserCode, out var request));
         Assert.NotNull(request);
         Assert.Equal("Kitchen Tablet", request!.DeviceName);
         Assert.Equal("Tablet", request.DeviceType);
@@ -495,8 +493,8 @@ public class PairingStateMachineTests
         using var store = NewStore(clock);
         var pairing = store.Create("Bedroom TV", null, null, DeviceIp);
 
-        store.Lookup(pairing.UserCode, ApproverIp, out var shown);
-        store.BeginApproval(pairing.UserCode, ApproverIp, out var ticket);
+        store.Lookup(pairing.UserCode, out var shown);
+        store.BeginApproval(pairing.UserCode, out var ticket);
 
         // The approval path reads the name from the request rather than
         // from whatever the approving call carried, so what is issued is
@@ -513,9 +511,9 @@ public class PairingStateMachineTests
         var pairing = Request(store);
         var bare = pairing.UserCode.Replace("-", string.Empty);
 
-        Assert.Equal(PairingStatus.Pending, store.Lookup(bare.ToLowerInvariant(), ApproverIp, out _));
-        Assert.Equal(PairingStatus.Pending, store.Lookup(bare[..4] + " " + bare[4..], ApproverIp, out _));
-        Assert.Equal(PairingStatus.Pending, store.Lookup(pairing.UserCode, ApproverIp, out _));
+        Assert.Equal(PairingStatus.Pending, store.Lookup(bare.ToLowerInvariant(), out _));
+        Assert.Equal(PairingStatus.Pending, store.Lookup(bare[..4] + " " + bare[4..], out _));
+        Assert.Equal(PairingStatus.Pending, store.Lookup(pairing.UserCode, out _));
     }
 
     private static void SpinUntil(Func<bool> condition)

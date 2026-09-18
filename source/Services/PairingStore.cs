@@ -75,8 +75,6 @@ public sealed class PairingStore : IDisposable
 
     private const int MaxRequestsPerIp = 20;
 
-    private const int MaxFailedLookupsPerIp = 10;
-
     /// <summary>
     /// The public code's alphabet: twenty consonants, no vowels and no
     /// character that can be read as another one. No vowels means no code
@@ -87,10 +85,11 @@ public sealed class PairingStore : IDisposable
 
     /// <summary>
     /// Eight characters from a twenty-character alphabet — about 34.5 bits,
-    /// or one in 2.5×10¹⁰. Guessing it is bounded further by
-    /// <see cref="MaxFailedLookupsPerIp"/> and by the code being answerable
-    /// for five minutes; and a guessed code still cannot produce a key,
-    /// because guessing it is not being signed in.
+    /// or one in 2.5×10¹⁰. Guessing it is bounded further by the host's
+    /// shared authentication lockout, which counts every code that matched
+    /// nothing, and by the code being answerable for five minutes; and a
+    /// guessed code still cannot produce a key, because guessing it is not
+    /// being signed in.
     /// </summary>
     public const int UserCodeLength = 8;
 
@@ -115,8 +114,6 @@ public sealed class PairingStore : IDisposable
     private readonly ConcurrentDictionary<string, PairingEntry> _byUserCode = new(StringComparer.Ordinal);
 
     private readonly ConcurrentDictionary<string, WindowEntry> _requestsPerIp = new(StringComparer.Ordinal);
-
-    private readonly ConcurrentDictionary<string, WindowEntry> _failedLookupsPerIp = new(StringComparer.Ordinal);
 
     private readonly ILogger<PairingStore> _logger;
 
@@ -164,11 +161,18 @@ public sealed class PairingStore : IDisposable
     /// <summary>
     /// Checks whether the given address may open another pairing request.
     /// </summary>
+    /// <remarks>
+    /// A quota on requests that succeeded, not a counter of attempts that
+    /// failed, which is why it is the store's own and not the host's
+    /// authentication lockout. It is what bounds how much memory one
+    /// address can make the store hold; nothing here has failed, so there
+    /// is nothing to register against the caller.
+    /// </remarks>
     /// <param name="clientIp">The requesting address.</param>
     /// <param name="nextAllowedAt">When set, when the next request is allowed.</param>
     /// <returns><c>true</c> when the request is allowed; otherwise, <c>false</c>.</returns>
     public bool CanCreate(string clientIp, out DateTimeOffset? nextAllowedAt)
-        => IsUnderLimit(_requestsPerIp, clientIp, MaxRequestsPerIp, out nextAllowedAt);
+        => IsUnderLimit(clientIp, MaxRequestsPerIp, out nextAllowedAt);
 
     /// <summary>
     /// Opens a pairing request and returns both halves of it.
@@ -211,7 +215,7 @@ public sealed class PairingStore : IDisposable
         }
 
         _byDeviceCode[deviceCode] = entry;
-        RecordUse(_requestsPerIp, clientIp);
+        RecordUse(clientIp);
 
         _logger.LogInformation(
             "Pairing requested by {DeviceName} ({DeviceType}) from {ClientIP}; code {UserCode} expires at {ExpiresAt}.",
@@ -274,30 +278,25 @@ public sealed class PairingStore : IDisposable
     // ──────────────────────────────────────────────
 
     /// <summary>
-    /// Checks whether the given address may look up another code.
-    /// </summary>
-    /// <param name="clientIp">The approver's address.</param>
-    /// <param name="nextAllowedAt">When set, when the next lookup is allowed.</param>
-    /// <returns><c>true</c> when the lookup is allowed; otherwise, <c>false</c>.</returns>
-    public bool CanLookup(string clientIp, out DateTimeOffset? nextAllowedAt)
-        => IsUnderLimit(_failedLookupsPerIp, clientIp, MaxFailedLookupsPerIp, out nextAllowedAt);
-
-    /// <summary>
     /// Resolves a public code to the request it names, for the approval
     /// screen to show.
     /// </summary>
+    /// <remarks>
+    /// A code that matches nothing comes back as
+    /// <see cref="PairingStatus.Unknown"/> and is counted by the caller
+    /// against the host's shared authentication lockout. The store keeps no
+    /// miss counter of its own: a wrong code is a wrong secret, and a
+    /// client working through wrong secrets should be shut out of every
+    /// door at once rather than of this one.
+    /// </remarks>
     /// <param name="userCode">The public code, in any spacing or casing.</param>
-    /// <param name="clientIp">The approver's address, for the miss counter.</param>
     /// <param name="request">The request, when there is one that is still pending.</param>
     /// <returns>The status of the named request.</returns>
-    public PairingStatus Lookup(string userCode, string clientIp, out PairingRequest? request)
+    public PairingStatus Lookup(string userCode, out PairingRequest? request)
     {
         request = null;
         if (Normalize(userCode) is not { } normalized || !_byUserCode.TryGetValue(normalized, out var entry))
-        {
-            RecordUse(_failedLookupsPerIp, clientIp);
             return PairingStatus.Unknown;
-        }
 
         var status = Resolve(entry, Now);
         if (status is PairingStatus.Pending)
@@ -315,17 +314,13 @@ public sealed class PairingStore : IDisposable
     /// <see cref="CompleteApproval"/> or <see cref="AbandonApproval"/>.
     /// </remarks>
     /// <param name="userCode">The public code, in any spacing or casing.</param>
-    /// <param name="clientIp">The approver's address, for the miss counter.</param>
     /// <param name="ticket">The claim, when the request was pending.</param>
     /// <returns>The status of the named request.</returns>
-    public PairingStatus BeginApproval(string userCode, string clientIp, [NotNullWhen(true)] out ApprovalTicket? ticket)
+    public PairingStatus BeginApproval(string userCode, [NotNullWhen(true)] out ApprovalTicket? ticket)
     {
         ticket = null;
         if (Normalize(userCode) is not { } normalized || !_byUserCode.TryGetValue(normalized, out var entry))
-        {
-            RecordUse(_failedLookupsPerIp, clientIp);
             return PairingStatus.Unknown;
-        }
 
         var status = Resolve(entry, Now);
         if (status is not PairingStatus.Pending)
@@ -375,16 +370,12 @@ public sealed class PairingStore : IDisposable
     /// ordinary sign-in it would have shown had nobody tried to pair it.
     /// </remarks>
     /// <param name="userCode">The public code, in any spacing or casing.</param>
-    /// <param name="clientIp">The approver's address, for the miss counter.</param>
     /// <param name="username">Who refused, for the log.</param>
     /// <returns>The status of the named request after the attempt.</returns>
-    public PairingStatus Deny(string userCode, string clientIp, string username)
+    public PairingStatus Deny(string userCode, string username)
     {
         if (Normalize(userCode) is not { } normalized || !_byUserCode.TryGetValue(normalized, out var entry))
-        {
-            RecordUse(_failedLookupsPerIp, clientIp);
             return PairingStatus.Unknown;
-        }
 
         var status = Resolve(entry, Now);
         if (status is PairingStatus.Denied)
@@ -557,8 +548,7 @@ public sealed class PairingStore : IDisposable
             _byDeviceCode.TryRemove(entry.DeviceCode, out _);
         }
 
-        Sweep(_requestsPerIp, now);
-        Sweep(_failedLookupsPerIp, now);
+        Sweep(now);
     }
 
     private void RevokeQuietly(string apiKey)
@@ -580,16 +570,16 @@ public sealed class PairingStore : IDisposable
         });
     }
 
-    private bool IsUnderLimit(ConcurrentDictionary<string, WindowEntry> counters, string key, int limit, out DateTimeOffset? nextAllowedAt)
+    private bool IsUnderLimit(string key, int limit, out DateTimeOffset? nextAllowedAt)
     {
         nextAllowedAt = null;
-        if (!counters.TryGetValue(key, out var entry))
+        if (!_requestsPerIp.TryGetValue(key, out var entry))
             return true;
 
         var now = Now;
         if (now - entry.WindowStart >= RateLimitWindow)
         {
-            counters.TryRemove(key, out _);
+            _requestsPerIp.TryRemove(key, out _);
             return true;
         }
 
@@ -600,10 +590,10 @@ public sealed class PairingStore : IDisposable
         return false;
     }
 
-    private void RecordUse(ConcurrentDictionary<string, WindowEntry> counters, string key)
+    private void RecordUse(string key)
     {
         var now = Now;
-        counters.AddOrUpdate(
+        _requestsPerIp.AddOrUpdate(
             key,
             _ => new WindowEntry(now),
             (_, existing) =>
@@ -616,12 +606,12 @@ public sealed class PairingStore : IDisposable
             });
     }
 
-    private static void Sweep(ConcurrentDictionary<string, WindowEntry> counters, DateTimeOffset now)
+    private void Sweep(DateTimeOffset now)
     {
-        foreach (var (key, entry) in counters.ToArray())
+        foreach (var (key, entry) in _requestsPerIp.ToArray())
         {
             if (now - entry.WindowStart >= RateLimitWindow)
-                counters.TryRemove(key, out _);
+                _requestsPerIp.TryRemove(key, out _);
         }
     }
 

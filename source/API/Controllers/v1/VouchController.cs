@@ -40,6 +40,11 @@ namespace Shoko.Plugin.Vouch.API.Controllers.v1;
 /// </remarks>
 /// <param name="userService">The user service, which mints and revokes the key.</param>
 /// <param name="pairingStore">The pairing state machine.</param>
+/// <param name="throttleService">
+/// The host's authentication throttle, shared with the core and with every
+/// other plugin. See <see cref="ThrottleApprover"/> for what this plugin
+/// asks of it and what it tells it.
+/// </param>
 /// <param name="configurationProvider">The configuration provider.</param>
 /// <param name="logger">The logger instance.</param>
 [ApiController]
@@ -47,6 +52,7 @@ namespace Shoko.Plugin.Vouch.API.Controllers.v1;
 public class VouchController(
     IUserService userService,
     PairingStore pairingStore,
+    IAuthenticationThrottleService throttleService,
     ConfigurationProvider<VouchPluginConfiguration> configurationProvider,
     ILogger<VouchController> logger) : ControllerBase
 {
@@ -55,6 +61,8 @@ public class VouchController(
     private readonly IUserService _userService = userService;
 
     private readonly PairingStore _pairingStore = pairingStore;
+
+    private readonly IAuthenticationThrottleService _throttleService = throttleService;
 
     private readonly ConfigurationProvider<VouchPluginConfiguration> _configurationProvider = configurationProvider;
 
@@ -98,6 +106,13 @@ public class VouchController(
     [HttpPost("Request")]
     public ActionResult<RequestPairingResponse> RequestPairing([FromBody] RequestPairingRequest request)
     {
+        // Opening a pairing request is a step towards a credential, so a
+        // client the host has locked out of authenticating is locked out of
+        // this too. Nothing is registered against the client here: asking
+        // for a code is not a failed attempt at anything.
+        if (ThrottleClient() is { } lockedOut)
+            return lockedOut;
+
         if (!TryGetClientIps(out var ips))
             return NoClientIp("Pairing request");
 
@@ -196,25 +211,24 @@ public class VouchController(
     [HttpGet("Pending/{userCode}")]
     public ActionResult<PendingPairingResponse> Pending([FromRoute] string userCode)
     {
-        if (!TryGetClientIps(out var ips))
-            return NoClientIp("Pairing lookup");
-
         if (GetCurrentUser() is not { } user)
             return StatusCode(401, new VouchResponse { Message = "Sign in to answer a pairing request." });
 
-        if (!_pairingStore.CanLookup(ips, out var nextAllowedAt))
-        {
-            _logger.LogWarning("Pairing lookup denied due to rate limiting. Client IPs: {IPs}", ips);
-            return RateLimited("Too many attempts. Please try again later.", nextAllowedAt);
-        }
+        if (ThrottleApprover(user) is { } lockedOut)
+            return lockedOut;
 
-        var status = _pairingStore.Lookup(userCode, ips, out var pending);
+        var status = _pairingStore.Lookup(userCode, out var pending);
         if (status is not PairingStatus.Pending || pending is null)
+        {
+            RegisterCodeOutcome(status);
             return StatusCode(status is PairingStatus.Unknown ? 404 : 409, new AnswerPairingResponse
             {
                 Status = ToWireStatus(status),
                 Message = Describe(status, false),
             });
+        }
+
+        _throttleService.Reset(HttpContext);
 
         return Ok(new PendingPairingResponse
         {
@@ -250,11 +264,13 @@ public class VouchController(
     [HttpPost("Approve")]
     public async Task<ActionResult<AnswerPairingResponse>> Approve([FromBody] AnswerPairingRequest request)
     {
-        if (!TryGetClientIps(out var ips))
-            return NoClientIp("Pairing approval");
-
         if (GetCurrentUser() is not { } user)
             return StatusCode(401, new VouchResponse { Message = "Sign in to answer a pairing request." });
+
+        // Before anything else the caller could learn from, so a locked out
+        // client is told that and nothing else.
+        if (ThrottleApprover(user) is { } lockedOut)
+            return lockedOut;
 
         // A vouched key may not vouch. Checked before the request is claimed,
         // so a refusal leaves it answerable by someone who may.
@@ -270,19 +286,18 @@ public class VouchController(
             });
         }
 
-        if (!_pairingStore.CanLookup(ips, out var nextAllowedAt))
-        {
-            _logger.LogWarning("Pairing approval denied due to rate limiting. Client IPs: {IPs}", ips);
-            return RateLimited("Too many attempts. Please try again later.", nextAllowedAt);
-        }
-
-        var status = _pairingStore.BeginApproval(request.UserCode, ips, out var ticket);
+        var status = _pairingStore.BeginApproval(request.UserCode, out var ticket);
         if (status is not PairingStatus.Pending || ticket is null)
+        {
+            RegisterCodeOutcome(status);
             return StatusCode(status is PairingStatus.Unknown ? 404 : 409, new AnswerPairingResponse
             {
                 Status = ToWireStatus(status),
                 Message = Describe(status, false),
             });
+        }
+
+        _throttleService.Reset(HttpContext);
 
         var deviceName = ticket.Request.DeviceName;
         var lifetimeHours = _configurationProvider.Load().IssuedKeyLifetimeHours;
@@ -328,19 +343,13 @@ public class VouchController(
     [HttpPost("Deny")]
     public ActionResult<AnswerPairingResponse> Deny([FromBody] AnswerPairingRequest request)
     {
-        if (!TryGetClientIps(out var ips))
-            return NoClientIp("Pairing refusal");
-
         if (GetCurrentUser() is not { } user)
             return StatusCode(401, new VouchResponse { Message = "Sign in to answer a pairing request." });
 
-        if (!_pairingStore.CanLookup(ips, out var nextAllowedAt))
-        {
-            _logger.LogWarning("Pairing refusal denied due to rate limiting. Client IPs: {IPs}", ips);
-            return RateLimited("Too many attempts. Please try again later.", nextAllowedAt);
-        }
+        if (ThrottleApprover(user) is { } lockedOut)
+            return lockedOut;
 
-        var status = _pairingStore.Deny(request.UserCode, ips, user.Username);
+        var status = _pairingStore.Deny(request.UserCode, user.Username);
         var response = new AnswerPairingResponse
         {
             Status = ToWireStatus(status),
@@ -349,9 +358,102 @@ public class VouchController(
         };
 
         if (status is PairingStatus.Denied)
+        {
+            _throttleService.Reset(HttpContext);
             return Ok(response);
+        }
 
+        RegisterCodeOutcome(status);
         return StatusCode(status is PairingStatus.Unknown ? 404 : 409, response);
+    }
+
+    // ──────────────────────────────────────────────
+    //  Throttling
+    // ──────────────────────────────────────────────
+
+    /// <summary>
+    /// Refuses an anonymous caller that the host has locked out.
+    /// </summary>
+    /// <remarks>
+    /// Read-only. An anonymous caller here is opening a pairing request,
+    /// which cannot fail in a way that is an attempt at a secret, so there
+    /// is never a failure to register against it. What it does honour is a
+    /// lockout earned elsewhere: the store is the host's, shared with the
+    /// core sign-in and with every other plugin.
+    /// </remarks>
+    /// <returns>A 429, or <c>null</c> when the caller is not locked out.</returns>
+    private ActionResult? ThrottleClient()
+    {
+        if (_throttleService.GetRemainingLockout(HttpContext) is not { } remaining)
+            return null;
+
+        _logger.LogWarning("Pairing request refused: this client is locked out for another {Lockout}.", remaining);
+        return RateLimited("Too many attempts. Please try again later.", DateTimeOffset.UtcNow + remaining);
+    }
+
+    /// <summary>
+    /// Refuses a signed-in approver that the host has locked out, either as
+    /// a client or as a user.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The public code is the secret being tried here, and a code that
+    /// matched nothing is a wrong secret, so the guessing counter belongs in
+    /// the host's shared store rather than in one this plugin keeps: a
+    /// client working through codes should find every door shut, not just
+    /// this one, and a client the core already shut out should not find this
+    /// one open.
+    /// </para>
+    /// <para>
+    /// The username passed is the <em>approver's</em>, never the code. The
+    /// host files usernames and client addresses in separate namespaces, and
+    /// a code put in the username slot would land among the usernames, where
+    /// one that happened to read like a real account would share that
+    /// account's lockout in both directions.
+    /// </para>
+    /// <para>
+    /// Both dimensions are read and only the client one is written. A wrong
+    /// pairing code says nothing about the approver's own credential, which
+    /// was never in question, so counting it against the account would let
+    /// anyone holding a session lock that account out of signing in.
+    /// </para>
+    /// </remarks>
+    /// <param name="user">The signed-in approver.</param>
+    /// <returns>A 429, or <c>null</c> when neither is locked out.</returns>
+    private ActionResult? ThrottleApprover(IUser user)
+    {
+        // Sets Retry-After and logs the throttled attempt itself; the body is
+        // ours, because the approval page reads a message out of it.
+        if (_throttleService.ThrottleAuthentication(HttpContext, user.Username) is null)
+            return null;
+
+        var clientLockout = _throttleService.GetRemainingLockout(HttpContext);
+        var userLockout = _throttleService.GetRemainingLockout(user);
+        var remaining = userLockout is null
+            ? clientLockout
+            : clientLockout is null || userLockout > clientLockout
+                ? userLockout
+                : clientLockout;
+        return RateLimited(
+            "Too many attempts. Please try again later.",
+            remaining is { } lockout ? DateTimeOffset.UtcNow + lockout : null);
+    }
+
+    /// <summary>
+    /// Counts a code that matched nothing against the caller.
+    /// </summary>
+    /// <remarks>
+    /// Only <see cref="PairingStatus.Unknown"/> counts. A code that named a
+    /// real request which has since expired, been refused or been collected
+    /// is a code the caller was given rather than one it guessed, and
+    /// charging for it would lock out the person whose device took too long
+    /// to be confirmed.
+    /// </remarks>
+    /// <param name="status">The status the code resolved to.</param>
+    private void RegisterCodeOutcome(PairingStatus status)
+    {
+        if (status is PairingStatus.Unknown)
+            _throttleService.RegisterFailure(HttpContext);
     }
 
     // ──────────────────────────────────────────────
@@ -426,7 +528,9 @@ public class VouchController(
         if (nextAllowedAt.HasValue)
         {
             response.RetryAfter = nextAllowedAt.Value;
-            var seconds = (int)(nextAllowedAt.Value - DateTimeOffset.UtcNow).TotalSeconds;
+            // Rounded up, never down: a Retry-After of zero invites the very
+            // next request to be another refusal.
+            var seconds = (int)Math.Ceiling((nextAllowedAt.Value - DateTimeOffset.UtcNow).TotalSeconds);
             Response.Headers.RetryAfter = seconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
         }
 

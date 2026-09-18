@@ -211,20 +211,48 @@ stopped polling learn *expired* instead of *unknown*.
 
 ## Rate Limits
 
-| What | Limit | Scope |
-|------|-------|-------|
-| Opening a request | 20 per 15 minutes | Per IP address |
-| Codes that matched nothing | 10 per 15 minutes | Per IP address |
-| Polling early | `slowDown`, interval grows | Per request |
+| What | Limit | Scope | Kept by |
+|------|-------|-------|---------|
+| Opening a request | 20 per 15 minutes | Per IP address | The plugin |
+| Codes that matched nothing | Shoko's authentication lockout | Per client address | Shoko |
+| Polling early | `slowDown`, interval grows | Per request | The plugin |
 
 Exceeding a limit returns **429 Too Many Requests** with a `Retry-After`
 header and a `retryAfter` field in the body.
+
+**A code that matched nothing is a wrong secret**, so it is counted where
+Shoko counts a wrong password rather than in a ledger this plugin keeps to
+itself. That ledger is one store shared by the server and every plugin: a
+client working through codes is shut out of signing in as well, and a client
+Shoko has already shut out finds `Request`, `Pending`, `Approve` and `Deny`
+closed too. How many attempts it takes and how long the lockout lasts are
+Shoko's own settings, and an administrator changes them there.
+
+Three things follow that are worth knowing:
+
+- **The approver's account is never charged.** A wrong code says nothing
+  about the password of whoever typed it, and counting it against the account
+  would let anyone holding a session lock that account out of signing in.
+  What is charged is the address the attempt came from.
+- **A code you were given costs nothing**, including one that has expired,
+  been refused or already been collected. Only a code that names no request
+  at all counts.
+- **Polling is never refused for a lockout.** The requesting device holds a
+  256-bit code it was issued rather than one it guessed, and a device with no
+  keyboard has to be told *denied* or *expired* plainly rather than left in
+  silence.
+
+Behind a reverse proxy, Shoko reads the client address from the connection
+rather than from `X-Forwarded-*`, so every client arrives as the proxy and
+they share one lockout. `TrustProxy` does not change that. It applies to
+what the plugin keeps itself: the per-address quota on opening requests, the
+address shown to the approver, and the host in the verification URL.
 
 ## Configuration
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `TrustProxy` | `false` | Read `X-Forwarded-*` when determining the client address and the host in the verification URL. Enable only behind a trusted reverse proxy — otherwise a caller chooses its own address and the host that ends up inside a QR code. Only the rightmost `X-Forwarded-For` entry is believed, and only if it parses as an address, so a caller cannot vary the chain to escape rate limiting. |
+| `TrustProxy` | `false` | Read `X-Forwarded-*` when determining the client address and the host in the verification URL. Enable only behind a trusted reverse proxy — otherwise a caller chooses its own address and the host that ends up inside a QR code. Only the rightmost `X-Forwarded-For` entry is believed, and only if it parses as an address, so a caller cannot vary the chain to escape the request quota. It does not reach Shoko's authentication lockout, which reads the connection. |
 | `IssuedKeyLifetimeHours` | `4320` (six months) | How long an issued key lasts, in hours. Minimum 1. There is no never-expires setting: an issued key outliving the session that approved it is the point of the plugin, and a bound is what that costs. Administrators only — Shoko gates its whole configuration API on the `admin` role. |
 
 ### A vouched key says so, and cannot vouch
