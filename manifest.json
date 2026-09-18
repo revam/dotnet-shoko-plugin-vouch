@@ -5,10 +5,28 @@
   "authors": "revam",
   "repository_url": "https://github.com/revam/dotnet-shoko-plugin-vouch",
   "tags": [
+    "service-registration",
     "pairing",
     "device-sign-in",
     "authentication",
     "api"
   ],
-  "releases": []
+  "releases": [
+    {
+      "version": "1.0.0",
+      "tag": "v1.0.0",
+      "released_at": "2026-09-18T04:19:34.8591848Z",
+      "channel": "Stable",
+      "release_notes": "First release.\n\nSigns in a second device by showing it a short code. A device that is awkward to type on displays the code; a signed-in device confirms it and the first device receives its own API key.\n\nFailed attempts count towards Shoko\u0027s shared authentication lockout, so a client hammering the pairing endpoint is locked out server-wide rather than only here.\n\nRequires Shoko Server with abstractions \u00606.0.0-alpha.89\u0060.",
+      "dependencies": [],
+      "archives": [
+        {
+          "runtime": "any",
+          "abstraction": "6.0.0",
+          "url": "https://github.com/revam/dotnet-shoko-plugin-vouch/releases/download/v1.0.0/Vouch-v1.0.0-any.zip",
+          "checksum": "sha256:40d478a5e10f74479cdff0182724e32242cd6821c750a4727e796ccf3867e10a"
+        }
+      ]
+    }
+  ]
 }
