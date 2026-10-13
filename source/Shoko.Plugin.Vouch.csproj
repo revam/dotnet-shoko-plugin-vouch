@@ -25,6 +25,8 @@
             to arrive separately is a page that will one day be missing.
         -->
         <EmbeddedResource Include="Assets/approve.html" />
+        <EmbeddedResource Include="Assets\thumbnail.svg" LogicalName="Shoko.Plugin.Vouch.Assets.thumbnail.svg" />
+        <EmbeddedResource Include="Assets\icon.svg" LogicalName="Shoko.Plugin.Vouch.Assets.icon.svg" />
     </ItemGroup>
 
     <ItemGroup>

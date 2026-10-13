@@ -28,6 +28,12 @@ public class Plugin : IPlugin, IPluginServiceRegistration
     """;
 
     /// <inheritdoc/>
+    public string? EmbeddedThumbnailResourceName => "Shoko.Plugin.Vouch.Assets.thumbnail.svg";
+
+    /// <inheritdoc/>
+    public string? EmbeddedIconResourceName => "Shoko.Plugin.Vouch.Assets.icon.svg";
+
+    /// <inheritdoc/>
     public IReadOnlyList<PluginPage> GetPages() =>
     [
         new()
