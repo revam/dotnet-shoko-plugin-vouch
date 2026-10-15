@@ -7,7 +7,7 @@ namespace Shoko.Plugin.Vouch.Configuration;
 /// <summary>
 /// Configuration for the Vouch plugin.
 /// </summary>
-public class VouchPluginConfiguration : IConfiguration
+public class VouchPluginConfiguration : IPluginConfiguration
 {
     /// <summary>
     /// Gets or sets a value indicating whether to trust <c>X-Forwarded-*</c>

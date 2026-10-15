@@ -5,12 +5,13 @@ using Microsoft.Extensions.Logging;
 using Shoko.Abstractions.Plugin;
 using Shoko.Abstractions.Plugin.Models;
 using Shoko.Abstractions.User.Services;
+using Shoko.Plugin.Vouch.Configuration;
 using Shoko.Plugin.Vouch.Services;
 
 namespace Shoko.Plugin.Vouch;
 
 /// <inheritdoc/>
-public class Plugin : IPlugin, IPluginServiceRegistration
+public class Plugin : IPlugin<VouchPluginConfiguration>, IPluginServiceRegistration
 {
     /// <inheritdoc/>
     public Guid ID { get; private init; } = Constants.PluginGuid;
