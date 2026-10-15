@@ -13,6 +13,22 @@
   ],
   "releases": [
     {
+      "version": "1.1.0",
+      "tag": "v1.1.0",
+      "released_at": "2026-10-15T09:40:30.5141369Z",
+      "channel": "Stable",
+      "release_notes": "Its settings are now the plugin\u0027s own settings, so a client can open them from the plugin. Otherwise behaves as before.\n\nRequires Shoko Server with abstractions \u00606.0.0-alpha.107\u0060.",
+      "dependencies": [],
+      "archives": [
+        {
+          "runtime": "any",
+          "abstraction": "6.0.0",
+          "url": "https://github.com/revam/dotnet-shoko-plugin-vouch/releases/download/v1.1.0/Vouch-v1.1.0-any.zip",
+          "checksum": "sha256:0a174fffe611393c5ec283f0ffa57fde002a3ddf6bea86e692e937b5b6eef5cf"
+        }
+      ]
+    },
+    {
       "version": "1.0.5",
       "tag": "v1.0.5",
       "released_at": "2026-10-13T23:51:28.3738256Z",
